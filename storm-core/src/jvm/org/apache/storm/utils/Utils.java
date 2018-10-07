@@ -32,7 +32,6 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.curator.ensemble.exhibitor.DefaultExhibitorRestClient;
 import org.apache.curator.ensemble.exhibitor.ExhibitorEnsembleProvider;
 import org.apache.curator.ensemble.exhibitor.Exhibitors;
-import org.apache.curator.framework.api.ACLProvider;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.storm.Config;
@@ -170,7 +169,6 @@ public class Utils {
     public static final boolean IS_ON_WINDOWS = "Windows_NT".equals(System.getenv("OS"));
     public static final String FILE_PATH_SEPARATOR = System.getProperty("file.separator");
     public static final String CLASS_PATH_SEPARATOR = System.getProperty("path.separator");
-    private static final Pattern TOPOLOGY_KEY_PATTERN = Pattern.compile("^[\\w \\t\\.:_-]+$", Pattern.UNICODE_CHARACTER_CLASS);
 
     public static final int SIGKILL = 9;
     public static final int SIGTERM = 15;
@@ -577,7 +575,7 @@ public class Utils {
     }
 
     public void downloadResourcesAsSupervisorImpl(String key, String localFile,
-            ClientBlobStore cb) throws AuthorizationException, KeyNotFoundException, IOException {
+                                                  ClientBlobStore cb) throws AuthorizationException, KeyNotFoundException, IOException {
         final int MAX_RETRY_ATTEMPTS = 2;
         final int ATTEMPTS_INTERVAL_TIME = 100;
         for (int retryAttempts = 0; retryAttempts < MAX_RETRY_ATTEMPTS; retryAttempts++) {
@@ -597,7 +595,7 @@ public class Utils {
     private static boolean downloadResourcesAsSupervisorAttempt(ClientBlobStore cb, String key, String localFile) {
         boolean isSuccess = false;
         try (FileOutputStream out = new FileOutputStream(localFile);
-                InputStreamWithMeta in = cb.getBlob(key);) {
+             InputStreamWithMeta in = cb.getBlob(key);) {
             long fileSize = in.getFileLength();
 
             byte[] buffer = new byte[1024];
@@ -625,7 +623,7 @@ public class Utils {
     public static boolean checkFileExists(File path) {
         return Files.exists(path.toPath());
     }
-    
+
     public static boolean checkFileExists(String path) {
         return Files.exists(new File(path).toPath());
     }
@@ -829,6 +827,18 @@ public class Utils {
         }
     }
 
+    public static Long getLong(Object o, Long defaultValue) {
+        if (null == o) {
+            return defaultValue;
+        }
+        if (o instanceof Number) {
+            return ((Number) o).longValue();
+        } else {
+            LOG.error("Don't know how to convert " + o + " + to Long, user defaultValue: " + defaultValue);
+            return defaultValue;
+        }
+    }
+
     public static boolean getBoolean(Object o, boolean defaultValue) {
         if (null == o) {
             return defaultValue;
@@ -862,9 +872,52 @@ public class Utils {
      * @param jarFile the .jar file to unpack
      * @param toDir the destination directory into which to unpack the jar
      */
-    public static void unJar(File jarFile, File toDir) throws IOException {
-        try (JarFile jar = new JarFile(jarFile)) {
-            extractZipFile(jar, toDir, null);
+    public static void unJar(File jarFile, File toDir)
+            throws IOException {
+        JarFile jar = new JarFile(jarFile);
+        try {
+            Enumeration<JarEntry> entries = jar.entries();
+            while (entries.hasMoreElements()) {
+                final JarEntry entry = entries.nextElement();
+                if (!entry.isDirectory()) {
+                    InputStream in = jar.getInputStream(entry);
+                    try {
+                        File file = new File(toDir, entry.getName());
+                        ensureDirectory(file.getParentFile());
+                        OutputStream out = new FileOutputStream(file);
+                        try {
+                            copyBytes(in, out, 8192);
+                        } finally {
+                            out.close();
+                        }
+                    } finally {
+                        in.close();
+                    }
+                }
+            }
+        } finally {
+            jar.close();
+        }
+    }
+
+    /**
+     * Copies from one stream to another.
+     *
+     * @param in InputStream to read from
+     * @param out OutputStream to write to
+     * @param buffSize the size of the buffer
+     */
+    public static void copyBytes(InputStream in, OutputStream out, int buffSize)
+            throws IOException {
+        PrintStream ps = out instanceof PrintStream ? (PrintStream)out : null;
+        byte buf[] = new byte[buffSize];
+        int bytesRead = in.read(buf);
+        while (bytesRead >= 0) {
+            out.write(buf, 0, bytesRead);
+            if ((ps != null) && ps.checkError()) {
+                throw new IOException("Unable to write to output stream.");
+            }
+            bytesRead = in.read(buf);
         }
     }
 
@@ -888,17 +941,20 @@ public class Utils {
      *
      * @param inFile   The tar file as input.
      * @param untarDir The untar directory where to untar the tar file.
-     * @param symlinksDisabled true if symlinks should be disabled, else false.
      * @throws IOException
      */
-    public static void unTar(File inFile, File untarDir, boolean symlinksDisabled) throws IOException {
-        ensureDirectory(untarDir);
+    public static void unTar(File inFile, File untarDir) throws IOException {
+        if (!untarDir.mkdirs()) {
+            if (!untarDir.isDirectory()) {
+                throw new IOException("Mkdirs failed to create " + untarDir);
+            }
+        }
 
         boolean gzipped = inFile.toString().endsWith("gz");
-        if (Utils.isOnWindows() || symlinksDisabled) {
+        if (isOnWindows()) {
             // Tar is not native to Windows. Use simple Java based implementation for
             // tests and simple tar archives
-            unTarUsingJava(inFile, untarDir, gzipped, symlinksDisabled);
+            unTarUsingJava(inFile, untarDir, gzipped);
         } else {
             // spawn tar utility to untar archive for full fledged unix behavior such
             // as resolving symlinks in tar archives
@@ -935,9 +991,7 @@ public class Utils {
     }
 
     private static void unTarUsingJava(File inFile, File untarDir,
-                                       boolean gzipped, boolean symlinksDisabled) throws IOException {
-        final String base = untarDir.getCanonicalPath();
-        LOG.trace("java untar {} to {}", inFile, base);
+                                       boolean gzipped) throws IOException {
         InputStream inputStream = null;
         try {
             if (gzipped) {
@@ -948,7 +1002,7 @@ public class Utils {
             }
             try (TarArchiveInputStream tis = new TarArchiveInputStream(inputStream)) {
                 for (TarArchiveEntry entry = tis.getNextTarEntry(); entry != null; ) {
-                    unpackEntries(tis, entry, untarDir, base, symlinksDisabled);
+                    unpackEntries(tis, entry, untarDir);
                     entry = tis.getNextTarEntry();
                 }
             }
@@ -960,82 +1014,35 @@ public class Utils {
     }
 
     private static void unpackEntries(TarArchiveInputStream tis,
-                                      TarArchiveEntry entry, File outputDir, final String base,
-                                      boolean symlinksDisabled) throws IOException {
-        File target = new File(outputDir, entry.getName());
-        String found = target.getCanonicalPath();
-        if (!found.startsWith(base)) {
-            LOG.error("Invalid location {} is outside of {}", found, base);
+                                      TarArchiveEntry entry, File outputDir) throws IOException {
+        if (entry.isDirectory()) {
+            File subDir = new File(outputDir, entry.getName());
+            if (!subDir.mkdirs() && !subDir.isDirectory()) {
+                throw new IOException("Mkdirs failed to create tar internal dir "
+                        + outputDir);
+            }
+            for (TarArchiveEntry e : entry.getDirectoryEntries()) {
+                unpackEntries(tis, e, subDir);
+            }
             return;
         }
-        if (entry.isDirectory()) {
-            LOG.trace("Extracting dir {}", target);
-            ensureDirectory(target);
-            for (TarArchiveEntry e : entry.getDirectoryEntries()) {
-                unpackEntries(tis, e, target, base, symlinksDisabled);
+        File outputFile = new File(outputDir, entry.getName());
+        if (!outputFile.getParentFile().exists()) {
+            if (!outputFile.getParentFile().mkdirs()) {
+                throw new IOException("Mkdirs failed to create tar internal dir "
+                        + outputDir);
             }
-        } else if (entry.isSymbolicLink()) {
-            if (symlinksDisabled) {
-                LOG.info("Symlinks disabled skipping {}", target);
-            } else {
-                Path src = target.toPath();
-                Path dest = Paths.get(entry.getLinkName());
-                LOG.trace("Extracting sym link {} to {}", target, dest);
-                // Create symbolic link relative to tar parent dir
-                Files.createSymbolicLink(src, dest);
-            }
-        } else if (entry.isFile()) {
-            LOG.trace("Extracting file {}", target);
-            ensureDirectory(target.getParentFile());
-            try (BufferedOutputStream outputStream = new BufferedOutputStream(new FileOutputStream(target))) {
-                IOUtils.copy(tis, outputStream);
-            }
-        } else {
-            LOG.error("{} is not a currently supported tar entry type.", entry);
         }
+        int count;
+        byte data[] = new byte[2048];
+        BufferedOutputStream outputStream = new BufferedOutputStream(
+                new FileOutputStream(outputFile));
 
-        Path p = target.toPath();
-        if (Files.exists(p)) {
-            try {
-                //We created it so lets chmod it properly
-                int mode = entry.getMode();
-                Files.setPosixFilePermissions(p, parsePerms(mode));
-            } catch (UnsupportedOperationException e) {
-                //Ignored the file system we are on does not support this, so don't do it.
-            }
+        while ((count = tis.read(data)) != -1) {
+            outputStream.write(data, 0, count);
         }
-    }
-
-    private static Set<PosixFilePermission> parsePerms(int mode) {
-        Set<PosixFilePermission> ret = new HashSet<>();
-        if ((mode & 0001) > 0) {
-            ret.add(PosixFilePermission.OTHERS_EXECUTE);
-        }
-        if ((mode & 0002) > 0) {
-            ret.add(PosixFilePermission.OTHERS_WRITE);
-        }
-        if ((mode & 0004) > 0) {
-            ret.add(PosixFilePermission.OTHERS_READ);
-        }
-        if ((mode & 0010) > 0) {
-            ret.add(PosixFilePermission.GROUP_EXECUTE);
-        }
-        if ((mode & 0020) > 0) {
-            ret.add(PosixFilePermission.GROUP_WRITE);
-        }
-        if ((mode & 0040) > 0) {
-            ret.add(PosixFilePermission.GROUP_READ);
-        }
-        if ((mode & 0100) > 0) {
-            ret.add(PosixFilePermission.OWNER_EXECUTE);
-        }
-        if ((mode & 0200) > 0) {
-            ret.add(PosixFilePermission.OWNER_WRITE);
-        }
-        if ((mode & 0400) > 0) {
-            ret.add(PosixFilePermission.OWNER_READ);
-        }
-        return ret;
+        outputStream.flush();
+        outputStream.close();
     }
 
     public static boolean isOnWindows() {
@@ -1049,21 +1056,16 @@ public class Utils {
         return Paths.get(path).isAbsolute();
     }
 
-    public static void unpack(File localrsrc, File dst, boolean symLinksDisabled) throws IOException {
+    public static void unpack(File localrsrc, File dst) throws IOException {
         String lowerDst = localrsrc.getName().toLowerCase();
-        if (lowerDst.endsWith(".jar") ||
-            lowerDst.endsWith("_jar")) {
+        if (lowerDst.endsWith(".jar")) {
             unJar(localrsrc, dst);
-        } else if (lowerDst.endsWith(".zip") ||
-            lowerDst.endsWith("_zip")) {
+        } else if (lowerDst.endsWith(".zip")) {
             unZip(localrsrc, dst);
         } else if (lowerDst.endsWith(".tar.gz") ||
-            lowerDst.endsWith("_tar_gz") ||
-            lowerDst.endsWith(".tgz") ||
-            lowerDst.endsWith("_tgz") ||
-            lowerDst.endsWith(".tar") ||
-            lowerDst.endsWith("_tar")) {
-            unTar(localrsrc, dst, symLinksDisabled);
+                lowerDst.endsWith(".tgz") ||
+                lowerDst.endsWith(".tar")) {
+            unTar(localrsrc, dst);
         } else {
             LOG.warn("Cannot unpack " + localrsrc);
             if (!localrsrc.renameTo(dst)) {
@@ -1073,35 +1075,6 @@ public class Utils {
         }
         if (localrsrc.isFile()) {
             localrsrc.delete();
-        }
-    }
-
-    private static void extractZipFile(ZipFile zipFile, File toDir, String prefix) throws IOException {
-        ensureDirectory(toDir);
-        final String base = toDir.getCanonicalPath();
-
-        Enumeration<? extends ZipEntry> entries = zipFile.entries();
-        while (entries.hasMoreElements()) {
-            ZipEntry entry = entries.nextElement();
-            if (!entry.isDirectory()) {
-                if (prefix != null && !entry.getName().startsWith(prefix)) {
-                    //No need to extract it, it is not what we are looking for.
-                    continue;
-                }
-                File file = new File(toDir, entry.getName());
-                String found = file.getCanonicalPath();
-                if (!found.startsWith(base)) {
-                    LOG.error("Invalid location {} is outside of {}", found, base);
-                    continue;
-                }
-
-                try (InputStream in = zipFile.getInputStream(entry)) {
-                    ensureDirectory(file.getParentFile());
-                    try (OutputStream out = new FileOutputStream(file)) {
-                        IOUtils.copy(in, out);
-                    }
-                }
-            }
         }
     }
 
@@ -1118,16 +1091,15 @@ public class Utils {
         return false;
     }
 
-    public static CuratorFramework newCurator(Map conf, List<String> servers, Object port, String root, List<ACL> defaultAcl) {
-        return newCurator(conf, servers, port, root, null, defaultAcl);
+    public static CuratorFramework newCurator(Map conf, List<String> servers, Object port, String root) {
+        return newCurator(conf, servers, port, root, null);
     }
 
-    public static CuratorFramework newCurator(Map conf, List<String> servers, Object port, ZookeeperAuthInfo auth, List<ACL> defaultAcl) {
-        return newCurator(conf, servers, port, "", auth, defaultAcl);
+    public static CuratorFramework newCurator(Map conf, List<String> servers, Object port, ZookeeperAuthInfo auth) {
+        return newCurator(conf, servers, port, "", auth);
     }
 
-    public static CuratorFramework newCurator(Map conf, List<String> servers, Object port, String root, ZookeeperAuthInfo auth,
-                                              final List<ACL> defaultAcl) {
+    public static CuratorFramework newCurator(Map conf, List<String> servers, Object port, String root, ZookeeperAuthInfo auth) {
         List<String> serverPorts = new ArrayList<String>();
         for (String zkServer : servers) {
             serverPorts.add(zkServer + ":" + Utils.getInt(port));
@@ -1136,19 +1108,6 @@ public class Utils {
         CuratorFrameworkFactory.Builder builder = CuratorFrameworkFactory.builder();
 
         setupBuilder(builder, zkStr, conf, auth);
-        if (defaultAcl != null) {
-            builder.aclProvider(new ACLProvider() {
-                @Override
-                public List<ACL> getDefaultAcl() {
-                    return defaultAcl;
-                }
-
-                @Override
-                public List<ACL> getAclForPath(String s) {
-                    return null;
-                }
-            });
-        }
 
         return builder.build();
     }
@@ -1159,30 +1118,30 @@ public class Utils {
         if (!exhibitorServers.isEmpty()) {
             // use exhibitor servers
             builder.ensembleProvider(new ExhibitorEnsembleProvider(
-                new Exhibitors(exhibitorServers, Utils.getInt(conf.get(Config.STORM_EXHIBITOR_PORT)),
-                    new Exhibitors.BackupConnectionStringProvider() {
-                        @Override
-                        public String getBackupConnectionString() throws Exception {
-                            // use zk servers as backup if they exist
-                            return zkStr;
-                        }}),
-                new DefaultExhibitorRestClient(),
-                Utils.getString(conf.get(Config.STORM_EXHIBITOR_URIPATH)),
-                Utils.getInt(conf.get(Config.STORM_EXHIBITOR_POLL)),
-                new StormBoundedExponentialBackoffRetry(
-                    Utils.getInt(conf.get(Config.STORM_EXHIBITOR_RETRY_INTERVAL)),
-                    Utils.getInt(conf.get(Config.STORM_EXHIBITOR_RETRY_INTERVAL_CEILING)),
-                    Utils.getInt(conf.get(Config.STORM_EXHIBITOR_RETRY_TIMES)))));
+                    new Exhibitors(exhibitorServers, Utils.getInt(conf.get(Config.STORM_EXHIBITOR_PORT)),
+                            new Exhibitors.BackupConnectionStringProvider() {
+                                @Override
+                                public String getBackupConnectionString() throws Exception {
+                                    // use zk servers as backup if they exist
+                                    return zkStr;
+                                }}),
+                    new DefaultExhibitorRestClient(),
+                    Utils.getString(conf.get(Config.STORM_EXHIBITOR_URIPATH)),
+                    Utils.getInt(conf.get(Config.STORM_EXHIBITOR_POLL)),
+                    new StormBoundedExponentialBackoffRetry(
+                            Utils.getInt(conf.get(Config.STORM_EXHIBITOR_RETRY_INTERVAL)),
+                            Utils.getInt(conf.get(Config.STORM_EXHIBITOR_RETRY_INTERVAL_CEILING)),
+                            Utils.getInt(conf.get(Config.STORM_EXHIBITOR_RETRY_TIMES)))));
         } else {
             builder.connectString(zkStr);
         }
         builder
-            .connectionTimeoutMs(Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_CONNECTION_TIMEOUT)))
-            .sessionTimeoutMs(Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_SESSION_TIMEOUT)))
-            .retryPolicy(new StormBoundedExponentialBackoffRetry(
-                    Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_RETRY_INTERVAL)),
-                    Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_RETRY_INTERVAL_CEILING)),
-                    Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_RETRY_TIMES))));
+                .connectionTimeoutMs(Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_CONNECTION_TIMEOUT)))
+                .sessionTimeoutMs(Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_SESSION_TIMEOUT)))
+                .retryPolicy(new StormBoundedExponentialBackoffRetry(
+                        Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_RETRY_INTERVAL)),
+                        Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_RETRY_INTERVAL_CEILING)),
+                        Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_RETRY_TIMES))));
 
         if (auth != null && auth.scheme != null && auth.payload != null) {
             builder.authorization(auth.scheme, auth.payload);
@@ -1195,15 +1154,15 @@ public class Utils {
         setupBuilder(builder, zkStr, conf, auth);
     }
 
-    public static CuratorFramework newCuratorStarted(Map conf, List<String> servers, Object port, String root, ZookeeperAuthInfo auth, List<ACL> defaultAcl) {
-        CuratorFramework ret = newCurator(conf, servers, port, root, auth, defaultAcl);
+    public static CuratorFramework newCuratorStarted(Map conf, List<String> servers, Object port, String root, ZookeeperAuthInfo auth) {
+        CuratorFramework ret = newCurator(conf, servers, port, root, auth);
         LOG.info("Starting Utils Curator...");
         ret.start();
         return ret;
     }
 
-    public static CuratorFramework newCuratorStarted(Map conf, List<String> servers, Object port, ZookeeperAuthInfo auth, List<ACL> defaultAcl) {
-        CuratorFramework ret = newCurator(conf, servers, port, auth, defaultAcl);
+    public static CuratorFramework newCuratorStarted(Map conf, List<String> servers, Object port, ZookeeperAuthInfo auth) {
+        CuratorFramework ret = newCurator(conf, servers, port, auth);
         LOG.info("Starting Utils Curator (2)...");
         ret.start();
         return ret;
@@ -1280,39 +1239,23 @@ public class Utils {
                 && !((String)conf.get(Config.STORM_ZOOKEEPER_TOPOLOGY_AUTH_SCHEME)).isEmpty());
     }
 
-    public static Id parseZkId(String id, String configName) {
-        String[] split = id.split(":", 2);
-        if (split.length != 2) {
-            throw new IllegalArgumentException(configName + " does not appear to be in the form scheme:acl, i.e. sasl:storm-user");
-        }
-        return new Id(split[0], split[1]);
-    }
 
-    /**
-     * Get the ACL for nimbus/supervisor.  The Super User ACL. This assumes that security is enabled.
-     * @param conf the config to get the super User ACL from
-     * @return the super user ACL.
-     */
-    public static ACL getSuperUserAcl(Map<String, Object> conf) {
+    public static List<ACL> getWorkerACL(Map conf) {
+        //This is a work around to an issue with ZK where a sasl super user is not super unless there is an open SASL ACL so we are trying to give the correct perms
+        if (!isZkAuthenticationConfiguredTopology(conf)) {
+            return null;
+        }
         String stormZKUser = (String)conf.get(Config.STORM_ZOOKEEPER_SUPERACL);
         if (stormZKUser == null) {
             throw new IllegalArgumentException("Authentication is enabled but " + Config.STORM_ZOOKEEPER_SUPERACL + " is not set");
         }
-        return new ACL(ZooDefs.Perms.ALL, parseZkId(stormZKUser, Config.STORM_ZOOKEEPER_SUPERACL));
-    }
-
-    /**
-     * Get the ZK ACLs that a worker should use when writing to ZK.
-     * @param conf the config for the topology.
-     * @return the ACLs
-     */
-    public static List<ACL> getWorkerACL(Map<String, Object> conf) {
-        if (!isZkAuthenticationConfiguredTopology(conf)) {
-            return null;
+        String[] split = stormZKUser.split(":", 2);
+        if (split.length != 2) {
+            throw new IllegalArgumentException(Config.STORM_ZOOKEEPER_SUPERACL + " does not appear to be in the form scheme:acl, i.e. sasl:storm-user");
         }
         ArrayList<ACL> ret = new ArrayList<ACL>(ZooDefs.Ids.CREATOR_ALL_ACL);
-        ret.add(getSuperUserAcl(conf));
-	return ret;
+        ret.add(new ACL(ZooDefs.Perms.ALL, new Id(split[0], split[1])));
+        return ret;
     }
 
     /**
@@ -1430,17 +1373,50 @@ public class Utils {
             }
         }
     }
-    
+
     /**
      * Given a File input it will unzip the file in a the unzip directory
      * passed as the second parameter
      * @param inFile The zip file as input
-     * @param toDir The unzip directory where to unzip the zip file.
+     * @param unzipDir The unzip directory where to unzip the zip file.
      * @throws IOException
      */
-    public static void unZip(File inFile, File toDir) throws IOException {
-        try (ZipFile zipFile = new ZipFile(inFile)) {
-            extractZipFile(zipFile, toDir, null);        }
+    public static void unZip(File inFile, File unzipDir) throws IOException {
+        Enumeration<? extends ZipEntry> entries;
+        ZipFile zipFile = new ZipFile(inFile);
+
+        try {
+            entries = zipFile.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                if (!entry.isDirectory()) {
+                    InputStream in = zipFile.getInputStream(entry);
+                    try {
+                        File file = new File(unzipDir, entry.getName());
+                        if (!file.getParentFile().mkdirs()) {
+                            if (!file.getParentFile().isDirectory()) {
+                                throw new IOException("Mkdirs failed to create " +
+                                        file.getParentFile().toString());
+                            }
+                        }
+                        OutputStream out = new FileOutputStream(file);
+                        try {
+                            byte[] buffer = new byte[8192];
+                            int i;
+                            while ((i = in.read(buffer)) != -1) {
+                                out.write(buffer, 0, i);
+                            }
+                        } finally {
+                            out.close();
+                        }
+                    } finally {
+                        in.close();
+                    }
+                }
+            }
+        } finally {
+            zipFile.close();
+        }
     }
 
     /**
@@ -1714,15 +1690,15 @@ public class Utils {
 
     public static void setupDefaultUncaughtExceptionHandler() {
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
-                public void uncaughtException(Thread thread, Throwable thrown) {
-                    try {
-                        handleUncaughtException(thrown);
-                    } catch (Error err) {
-                        LOG.error("Received error in main thread.. terminating server...", err);
-                        Runtime.getRuntime().exit(-2);
-                    }
+            public void uncaughtException(Thread thread, Throwable thrown) {
+                try {
+                    handleUncaughtException(thrown);
+                } catch (Error err) {
+                    LOG.error("Received error in main thread.. terminating server...", err);
+                    Runtime.getRuntime().exit(-2);
                 }
-            });
+            }
+        });
     }
 
     /**
@@ -1913,7 +1889,18 @@ public class Utils {
 
     public void extractDirFromJarImpl(String jarpath, String dir, File destdir) {
         try (JarFile jarFile = new JarFile(jarpath)) {
-            extractZipFile(jarFile, destdir, dir);
+            Enumeration<JarEntry> jarEnums = jarFile.entries();
+            while (jarEnums.hasMoreElements()) {
+                JarEntry entry = jarEnums.nextElement();
+                if (!entry.isDirectory() && entry.getName().startsWith(dir)) {
+                    File aFile = new File(destdir, entry.getName());
+                    aFile.getParentFile().mkdirs();
+                    try (FileOutputStream out = new FileOutputStream(aFile);
+                         InputStream in = jarFile.getInputStream(entry)) {
+                        IOUtils.copy(in, out);
+                    }
+                }
+            }
         } catch (IOException e) {
             LOG.info("Could not extract {} from {}", dir, jarpath);
         }
@@ -2046,18 +2033,18 @@ public class Utils {
     }
 
     public static String addToClasspath(String classpath,
-                Collection<String> paths) {
+                                        Collection<String> paths) {
         return _instance.addToClasspathImpl(classpath, paths);
     }
 
     public static String addToClasspath(Collection<String> classpaths,
-                Collection<String> paths) {
+                                        Collection<String> paths) {
         return _instance.addToClasspathImpl(classpaths, paths);
     }
 
     // Non-static impl methods exist for mocking purposes.
     public String addToClasspathImpl(String classpath,
-                Collection<String> paths) {
+                                     Collection<String> paths) {
         if (paths == null || paths.isEmpty()) {
             return classpath;
         }
@@ -2068,7 +2055,7 @@ public class Utils {
     }
 
     public String addToClasspathImpl(Collection<String> classpaths,
-                Collection<String> paths) {
+                                     Collection<String> paths) {
         List<String> allPaths = new ArrayList<>();
         if(classpaths != null) {
             allPaths.addAll(classpaths);
@@ -2174,9 +2161,9 @@ public class Utils {
      * @see java.lang.Thread
      */
     public static SmartThread asyncLoop(final Callable afn,
-            boolean isDaemon, final Thread.UncaughtExceptionHandler eh,
-            int priority, final boolean isFactory, boolean startImmediately,
-            String threadName) {
+                                        boolean isDaemon, final Thread.UncaughtExceptionHandler eh,
+                                        int priority, final boolean isFactory, boolean startImmediately,
+                                        String threadName) {
         SmartThread thread = new SmartThread(new Runnable() {
             public void run() {
                 Object s;
@@ -2245,8 +2232,8 @@ public class Utils {
             List<List<T>> rest = new ArrayList<List<T>>();
             for (List<T> node : nodeList) {
                 if (node != null && node.size() > 0) {
-                  first.add(node.get(0));
-                  rest.add(node.subList(1, node.size()));
+                    first.add(node.get(0));
+                    rest.add(node.subList(1, node.size()));
                 }
             }
             List<T> interleaveRest = interleaveAll(rest);
@@ -2256,7 +2243,7 @@ public class Utils {
             return first;
         }
         return null;
-      }
+    }
 
     public static long bitXor(Long a, Long b) {
         return a ^ b;
@@ -2304,30 +2291,16 @@ public class Utils {
     public static StormTopology addVersions(StormTopology topology) {
         String stormVersion = VersionInfo.getVersion();
         LOG.warn("STORM-VERSION new {} old {}", stormVersion, topology.get_storm_version());
-        if (stormVersion != null && 
-                !"Unknown".equalsIgnoreCase(stormVersion) && 
+        if (stormVersion != null &&
+                !"Unknown".equalsIgnoreCase(stormVersion) &&
                 !topology.is_set_storm_version()) {
             topology.set_storm_version(stormVersion);
         }
-        
+
         String jdkVersion = System.getProperty("java.version");
         if (jdkVersion != null && !topology.is_set_jdk_version()) {
             topology.set_jdk_version(jdkVersion);
         }
         return topology;
-    }
-
-    /**
-     * Validates topology name / blob key.
-     *
-     * @param key topology name / Key for the blob.
-     */
-    public static boolean isValidKey(String key) {
-        if (StringUtils.isEmpty(key) || "..".equals(key) || ".".equals(key) || !TOPOLOGY_KEY_PATTERN.matcher(key).matches()) {
-            LOG.error("'{}' does not appear to be valid. It must match {}. And it can't be \".\", \"..\", null or empty string.", key,
-                    TOPOLOGY_KEY_PATTERN);
-            return false;
-        }
-        return true;
     }
 }

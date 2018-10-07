@@ -57,30 +57,30 @@ public abstract class Container implements Killable {
 
         private final boolean _recovery;
         private final boolean _onlyKillable;
-        
+
         ContainerType(boolean recovery, boolean onlyKillable) {
             _recovery = recovery;
             _onlyKillable = onlyKillable;
         }
-        
+
         public boolean isRecovery() {
             return _recovery;
         }
-        
+
         public void assertFull() {
             if (_onlyKillable) {
                 throw new IllegalStateException("Container is only Killable.");
             }
         }
-        
+
         public boolean isOnlyKillable() {
             return _onlyKillable;
         }
     }
-    
+
     protected final Map<String, Object> _conf;
     protected final Map<String, Object> _topoConf; //Not set if RECOVER_PARTIAL
-    protected String _workerId; 
+    protected String _workerId;
     protected final String _topologyId; //Not set if RECOVER_PARTIAL
     protected final String _supervisorId;
     protected final int _port; //Not set if RECOVER_PARTIAL
@@ -103,18 +103,18 @@ public abstract class Container implements Killable {
      * @throws IOException on any error.
      */
     protected Container(ContainerType type, Map<String, Object> conf, String supervisorId,
-            int port, LocalAssignment assignment,
-            String workerId, Map<String, Object> topoConf,  AdvancedFSOps ops) throws IOException {
+                        int port, LocalAssignment assignment,
+                        String workerId, Map<String, Object> topoConf,  AdvancedFSOps ops) throws IOException {
         assert(type != null);
         assert(conf != null);
         assert(supervisorId != null);
-        
+
         _symlinksDisabled = (boolean)OR(conf.get(Config.DISABLE_SYMLINKS), false);
-        
+
         if (ops == null) {
             ops = AdvancedFSOps.make(conf);
         }
-        
+
         _workerId = workerId;
         _type = type;
         _port = port;
@@ -122,7 +122,7 @@ public abstract class Container implements Killable {
         _conf = conf;
         _supervisorId = supervisorId;
         _assignment = assignment;
-        
+
         if (_type.isOnlyKillable()) {
             assert(_assignment == null);
             assert(_port <= 0);
@@ -146,17 +146,17 @@ public abstract class Container implements Killable {
             }
         }
     }
-    
+
     @Override
     public String toString() {
         return "topo:" + _topologyId + " worker:" + _workerId;
     }
-    
+
     protected Map<String, Object> readTopoConf() throws IOException {
         assert(_topologyId != null);
         return ConfigUtils.readSupervisorStormConf(_conf, _topologyId);
     }
-    
+
     /**
      * Kill a given process
      * @param pid the id of the process to kill
@@ -165,7 +165,7 @@ public abstract class Container implements Killable {
     protected void kill(long pid) throws IOException {
         Utils.killProcessWithSigTerm(String.valueOf(pid));
     }
-    
+
     /**
      * Kill a given process
      * @param pid the id of the process to kill
@@ -174,7 +174,7 @@ public abstract class Container implements Killable {
     protected void forceKill(long pid) throws IOException {
         Utils.forceKillProcess(String.valueOf(pid));
     }
-    
+
     @Override
     public void kill() throws IOException {
         LOG.info("Killing {}:{}", _supervisorId, _workerId);
@@ -184,17 +184,17 @@ public abstract class Container implements Killable {
             kill(pid);
         }
     }
-    
+
     @Override
     public void forceKill() throws IOException {
         LOG.info("Force Killing {}:{}", _supervisorId, _workerId);
         Set<Long> pids = getAllPids();
-        
+
         for (Long pid : pids) {
             forceKill(pid);
         }
     }
-    
+
     /**
      * Read the Heartbeat for the current container.
      * @return the Heartbeat
@@ -220,7 +220,7 @@ public abstract class Container implements Killable {
         }
         return isPosixProcessAlive(pid, user);
     }
-    
+
     private boolean isWindowsProcessAlive(long pid, String user) throws IOException {
         boolean ret = false;
         ProcessBuilder pb = new ProcessBuilder("tasklist", "/fo", "list", "/fi", "pid eq " + pid, "/v");
@@ -250,7 +250,7 @@ public abstract class Container implements Killable {
         }
         return ret;
     }
-    
+
     private boolean isPosixProcessAlive(long pid, String user) throws IOException {
         boolean ret = false;
         ProcessBuilder pb = new ProcessBuilder("ps", "-o", "user", "-p", String.valueOf(pid));
@@ -271,12 +271,12 @@ public abstract class Container implements Killable {
         }
         return ret;
     }
-    
+
     @Override
     public boolean areAllProcessesDead() throws IOException {
         Set<Long> pids = getAllPids();
         String user = getWorkerUser();
-        
+
         boolean allDead = true;
         for (Long pid: pids) {
             if (!isProcessAlive(pid, user)) {
@@ -293,7 +293,7 @@ public abstract class Container implements Killable {
     public void cleanUp() throws IOException {
         cleanUpForRestart();
     }
-    
+
     /**
      * Setup the container to run.  By default this creates the needed directories/links in the
      * local file system
@@ -301,32 +301,32 @@ public abstract class Container implements Killable {
      * placed in the appropriate locations
      * @throws IOException on any error
      */
-    protected void setup() throws IOException {
+    public void setup() throws IOException {
         _type.assertFull();
         if (!_ops.doRequiredTopoFilesExist(_conf, _topologyId)) {
             LOG.info("Missing topology storm code, so can't launch  worker with assignment {} for this supervisor {} on port {} with id {}", _assignment,
                     _supervisorId, _port, _workerId);
             throw new IllegalStateException("Not all needed files are here!!!!");
-        } 
+        }
         LOG.info("Setting up {}:{}", _supervisorId, _workerId);
 
         _ops.forceMkdir(new File(ConfigUtils.workerPidsRoot(_conf, _workerId)));
         _ops.forceMkdir(new File(ConfigUtils.workerTmpRoot(_conf, _workerId)));
         _ops.forceMkdir(new File(ConfigUtils.workerHeartbeatsRoot(_conf, _workerId)));
-        
+
         File workerArtifacts = new File(ConfigUtils.workerArtifactsRoot(_conf, _topologyId, _port));
         if (!_ops.fileExists(workerArtifacts)) {
             _ops.forceMkdir(workerArtifacts);
             _ops.setupWorkerArtifactsDir(_assignment.get_owner(), workerArtifacts);
         }
-    
+
         String user = getWorkerUser();
         writeLogMetadata(user);
         saveWorkerUser(user);
         createArtifactsLink();
         createBlobstoreLinks();
     }
-    
+
     /**
      * Write out the file used by the log viewer to allow/reject log access
      * @param user the user this is going to run as
@@ -374,7 +374,7 @@ public abstract class Container implements Killable {
             yaml.dump(data, writer);
         }
     }
-    
+
     /**
      * Create symlink from the containers directory/artifacts to the artifacts directory
      * @throws IOException on any error
@@ -390,7 +390,7 @@ public abstract class Container implements Killable {
             }
         }
     }
-    
+
     /**
      * Create symlinks for each of the blobs from the container's directory to
      * corresponding links in the storm dist directory.
@@ -400,7 +400,7 @@ public abstract class Container implements Killable {
         _type.assertFull();
         String stormRoot = ConfigUtils.supervisorStormDistRoot(_conf, _topologyId);
         String workerRoot = ConfigUtils.workerRoot(_conf, _workerId);
-        
+
         @SuppressWarnings("unchecked")
         Map<String, Map<String, Object>> blobstoreMap = (Map<String, Map<String, Object>>) _topoConf.get(Config.TOPOLOGY_BLOBSTORE_MAP);
         List<String> blobFileNames = new ArrayList<>();
@@ -439,7 +439,7 @@ public abstract class Container implements Killable {
             LOG.warn("Symlinks are disabled, no symlinks created for blobs {}", blobFileNames);
         }
     }
-    
+
     /**
      * @return all of the pids that are a part of this container.
      */
@@ -448,11 +448,11 @@ public abstract class Container implements Killable {
         for (String listing: Utils.readDirContents(ConfigUtils.workerPidsRoot(_conf, _workerId))) {
             ret.add(Long.valueOf(listing));
         }
-        
+
         return ret;
     }
-    
-    /** 
+
+    /**
      * @return the user that some operations should be done as.
      * @throws IOException on any error
      */
@@ -475,18 +475,18 @@ public abstract class Container implements Killable {
             throw new IllegalStateException("Could not recover the user for " + _workerId);
         }
     }
-    
+
     protected void saveWorkerUser(String user) throws IOException {
         _type.assertFull();
         LOG.info("SET worker-user {} {}", _workerId, user);
         _ops.dump(new File(ConfigUtils.workerUserFile(_conf, _workerId)), user);
     }
-    
+
     protected void deleteSavedWorkerUser() throws IOException {
         LOG.info("REMOVE worker-user {}", _workerId);
         _ops.deleteIfExists(new File(ConfigUtils.workerUserFile(_conf, _workerId)));
     }
-    
+
     /**
      * Clean up the container partly preparing for restart.
      * By default delete all of the temp directories we are going
@@ -498,12 +498,12 @@ public abstract class Container implements Killable {
         LOG.info("Cleaning up {}:{}", _supervisorId, _workerId);
         Set<Long> pids = getAllPids();
         String user = getWorkerUser();
-        
+
         for (Long pid : pids) {
             File path = new File(ConfigUtils.workerPidPath(_conf, _workerId, pid));
             _ops.deleteIfExists(path, user, _workerId);
         }
-        
+
         //Always make sure to clean up everything else before worker directory
         //is removed since that is what is going to trigger the retry for cleanup
         _ops.deleteIfExists(new File(ConfigUtils.workerHeartbeatsRoot(_conf, _workerId)), user, _workerId);
@@ -513,14 +513,14 @@ public abstract class Container implements Killable {
         deleteSavedWorkerUser();
         _workerId = null;
     }
-    
+
     /**
      * Launch the process for the first time
      * PREREQUISITE: setup has run and passed
      * @throws IOException on any error
      */
     public abstract void launch() throws IOException;
-    
+
     /**
      * Restart the processes in this container
      * PREREQUISITE: cleanUpForRestart has run and passed

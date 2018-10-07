@@ -58,15 +58,15 @@ public class BasicContainer extends Container {
             return name.endsWith(".jar");
         }
     };
-    private static final Joiner CPJ = 
+    private static final Joiner CPJ =
             Joiner.on(Utils.CLASS_PATH_SEPARATOR).skipNulls();
-    
+
     protected final LocalState _localState;
     protected final String _profileCmd;
     protected final String _stormHome = System.getProperty("storm.home");
     protected volatile boolean _exitedEarly = false;
 
-    private class ProcessExitCallback implements ExitCodeCallback {
+    protected class ProcessExitCallback implements ExitCodeCallback {
         private final String _logPrefix;
 
         public ProcessExitCallback(String logPrefix) {
@@ -79,7 +79,7 @@ public class BasicContainer extends Container {
             _exitedEarly = true;
         }
     }
-    
+
     /**
      * Create a new BasicContainer
      * @param type the type of container being made.
@@ -91,11 +91,11 @@ public class BasicContainer extends Container {
      * @param workerId the id of the worker to use.  Must not be null if doing a partial recovery.
      */
     public BasicContainer(ContainerType type, Map<String, Object> conf, String supervisorId, int port,
-            LocalAssignment assignment,
-            LocalState localState, String workerId) throws IOException {
+                          LocalAssignment assignment,
+                          LocalState localState, String workerId) throws IOException {
         this(type, conf, supervisorId, port, assignment, localState, workerId, null, null, null);
     }
-    
+
     /**
      * Create a new BasicContainer
      * @param type the type of container being made.
@@ -106,16 +106,16 @@ public class BasicContainer extends Container {
      * @param localState the local state of the supervisor.  May be null if partial recovery
      * @param workerId the id of the worker to use.  Must not be null if doing a partial recovery.
      * @param ops file system operations (mostly for testing) if null a new one is made
-     * @param topoConf the config of the topology (mostly for testing) if null 
+     * @param topoConf the config of the topology (mostly for testing) if null
      * and not a partial recovery the real conf is read.
      * @param profileCmd the command to use when profiling (used for testing)
      * @throws IOException on any error
      * @throws ContainerRecoveryException if the Container could not be recovered.
      */
     BasicContainer(ContainerType type, Map<String, Object> conf, String supervisorId, int port,
-            LocalAssignment assignment,
-            LocalState localState, String workerId, Map<String, Object> topoConf, 
-            AdvancedFSOps ops, String profileCmd) throws IOException {
+                   LocalAssignment assignment,
+                   LocalState localState, String workerId, Map<String, Object> topoConf,
+                   AdvancedFSOps ops, String profileCmd) throws IOException {
         super(type, conf, supervisorId, port, assignment, workerId, topoConf, ops);
         assert(localState != null);
         _localState = localState;
@@ -207,7 +207,7 @@ public class BasicContainer extends Container {
 
     /**
      * Run the given command for profiling
-     * 
+     *
      * @param command
      *            the command to run
      * @param env
@@ -223,7 +223,7 @@ public class BasicContainer extends Container {
      *             if interrupted wile waiting for the process to exit.
      */
     protected boolean runProfilingCommand(List<String> command, Map<String, String> env, String logPrefix,
-            File targetDir) throws IOException, InterruptedException {
+                                          File targetDir) throws IOException, InterruptedException {
         _type.assertFull();
         Process p = SupervisorUtils.launchProcess(command, env, logPrefix, null, targetDir);
         int ret = p.waitFor();
@@ -345,13 +345,13 @@ public class BasicContainer extends Container {
         }
         return ret;
     }
-    
+
     protected List<String> frameworkClasspath() {
         File stormLibDir = new File(_stormHome, "lib");
         String stormConfDir =
                 System.getenv("STORM_CONF_DIR") != null ?
-                System.getenv("STORM_CONF_DIR") :
-                new File(_stormHome, "conf").getAbsolutePath();
+                        System.getenv("STORM_CONF_DIR") :
+                        new File(_stormHome, "conf").getAbsolutePath();
         File stormExtlibDir = new File(_stormHome, "extlib");
         String extcp = System.getenv("STORM_EXT_CLASSPATH");
         List<String> pathElements = new LinkedList<>();
@@ -362,7 +362,7 @@ public class BasicContainer extends Container {
 
         return pathElements;
     }
-    
+
     @SuppressWarnings("unchecked")
     private List<String> asStringList(Object o) {
         if (o instanceof String) {
@@ -372,7 +372,7 @@ public class BasicContainer extends Container {
         }
         return Collections.EMPTY_LIST;
     }
-    
+
     /**
      * Compute the classpath for the worker process
      * @param stormJar the topology jar
@@ -401,7 +401,7 @@ public class BasicContainer extends Container {
         }
         return string;
     }
-    
+
     protected List<String> substituteChildopts(Object value) {
         return substituteChildopts(value, -1);
     }
@@ -433,7 +433,7 @@ public class BasicContainer extends Container {
 
     /**
      * Launch the worker process (non-blocking)
-     * 
+     *
      * @param command
      *            the command to run
      * @param env
@@ -449,7 +449,7 @@ public class BasicContainer extends Container {
      *             on any error
      */
     protected void launchWorkerProcess(List<String> command, Map<String, String> env, String logPrefix,
-            ExitCodeCallback processExitCallback, File targetDir) throws IOException {
+                                       ExitCodeCallback processExitCallback, File targetDir) throws IOException {
         SupervisorUtils.launchProcess(command, env, logPrefix, processExitCallback, targetDir);
     }
 
@@ -463,27 +463,27 @@ public class BasicContainer extends Container {
         } else {
             log4jConfigurationDir = _stormHome + Utils.FILE_PATH_SEPARATOR + "log4j2";
         }
- 
+
         if (Utils.IS_ON_WINDOWS && !log4jConfigurationDir.startsWith("file:")) {
             log4jConfigurationDir = "file:///" + log4jConfigurationDir;
         }
         return log4jConfigurationDir + Utils.FILE_PATH_SEPARATOR + "worker.xml";
     }
-    
+
     private static class DependencyLocations {
         private List<String> _data = null;
         private final Map<String, Object> _conf;
         private final String _topologyId;
         private final AdvancedFSOps _ops;
         private final String _stormRoot;
-        
+
         public DependencyLocations(final Map<String, Object> conf, final String topologyId, final AdvancedFSOps ops, final String stormRoot) {
             _conf = conf;
             _topologyId = topologyId;
             _ops = ops;
             _stormRoot = stormRoot;
         }
-        
+
         public String toString() {
             List<String> data;
             synchronized(this) {
@@ -491,7 +491,7 @@ public class BasicContainer extends Container {
             }
             return "DEP_LOCS for " + _topologyId +" => " + data;
         }
-        
+
         public synchronized List<String> get() throws IOException {
             if (_data != null) {
                 return _data;
@@ -516,7 +516,7 @@ public class BasicContainer extends Container {
 
     static class DepLRUCache {
         public final int _maxSize = 100; //We could make this configurable in the future...
-        
+
         @SuppressWarnings("serial")
         private LinkedHashMap<String, DependencyLocations> _cache = new LinkedHashMap<String, DependencyLocations>() {
             @Override
@@ -524,7 +524,7 @@ public class BasicContainer extends Container {
                 return (size() > _maxSize);
             }
         };
-        
+
         public synchronized DependencyLocations get(final Map<String, Object> conf, final String topologyId, final AdvancedFSOps ops, String stormRoot) {
             //Only go off of the topology id for now.
             DependencyLocations dl = _cache.get(topologyId);
@@ -534,18 +534,18 @@ public class BasicContainer extends Container {
             }
             return dl;
         }
-        
+
         public synchronized void clear() {
             _cache.clear();
         }
     }
-    
+
     static final DepLRUCache DEP_LOC_CACHE = new DepLRUCache();
-    
+
     public static List<String> getDependencyLocationsFor(final Map<String, Object> conf, final String topologyId, final AdvancedFSOps ops, String stormRoot) throws IOException {
         return DEP_LOC_CACHE.get(conf, topologyId, ops, stormRoot).get();
     }
-    
+
     /**
      * Get parameters for the class path of the worker process.  Also used by the
      * log Writer
@@ -553,27 +553,27 @@ public class BasicContainer extends Container {
      * @return the classpath for the topology as command line arguments.
      * @throws IOException on any error.
      */
-    private List<String> getClassPathParams(final String stormRoot) throws IOException {
+    protected List<String> getClassPathParams(final String stormRoot) throws IOException {
         final String stormJar = ConfigUtils.supervisorStormJarPath(stormRoot);
         final List<String> dependencyLocations = getDependencyLocationsFor(_conf, _topologyId, _ops, stormRoot);
         final String workerClassPath = getWorkerClassPath(stormJar, dependencyLocations);
-        
+
         List<String> classPathParams = new ArrayList<>();
         classPathParams.add("-cp");
         classPathParams.add(workerClassPath);
         return classPathParams;
     }
-    
+
     /**
      * Get a set of java properties that are common to both the log writer and the worker processes.
      * These are mostly system properties that are used by logging.
      * @return a list of command line options
      */
-    private List<String> getCommonParams() {
+    protected List<String> getCommonParams() {
         final String workersArtifacts = ConfigUtils.workerArtifactsRoot(_conf);
         String stormLogDir = ConfigUtils.getLogDir();
         String log4jConfigurationFile = getWorkerLoggingConfigFile();
-        
+
         List<String> commonParams = new ArrayList<>();
         commonParams.add("-Dlogging.sensitivity=" + OR((String) _topoConf.get(Config.TOPOLOGY_LOGGING_SENSITIVITY), "S3"));
         commonParams.add("-Dlogfile.name=worker.log");
@@ -588,10 +588,10 @@ public class BasicContainer extends Container {
         commonParams.add("-Dstorm.local.dir=" + _conf.get(Config.STORM_LOCAL_DIR));
         return commonParams;
     }
-    
-    private int getMemOnHeap(WorkerResources resources) {
+
+    protected int getMemOnHeap(WorkerResources resources) {
         int memOnheap = 0;
-        if (resources != null && resources.is_set_mem_on_heap() && 
+        if (resources != null && resources.is_set_mem_on_heap() &&
                 resources.get_mem_on_heap() > 0) {
             memOnheap = (int) Math.ceil(resources.get_mem_on_heap());
         } else {
@@ -600,25 +600,25 @@ public class BasicContainer extends Container {
         }
         return memOnheap;
     }
-    
-    private List<String> getWorkerProfilerChildOpts(int memOnheap) {
+
+    protected List<String> getWorkerProfilerChildOpts(int memOnheap) {
         List<String> workerProfilerChildopts = new ArrayList<>();
         if (Utils.getBoolean(_conf.get(Config.WORKER_PROFILER_ENABLED), false)) {
             workerProfilerChildopts = substituteChildopts(_conf.get(Config.WORKER_PROFILER_CHILDOPTS), memOnheap);
         }
         return workerProfilerChildopts;
     }
-    
+
     /**
      * a or b the first one that is not null
      * @param a something
      * @param b something else
      * @return a or b the first one that is not null
      */
-    private <V> V OR(V a, V b) {
+    protected  <V> V OR(V a, V b) {
         return a == null ? b : a;
     }
-    
+
     protected String javaCmd(String cmd) {
         String ret = null;
         String javaHome = System.getenv().get("JAVA_HOME");
@@ -629,7 +629,7 @@ public class BasicContainer extends Container {
         }
         return ret;
     }
-    
+
     /**
      * Create the command to launch the worker process
      * @param memOnheap the on heap memory for the worker
@@ -639,15 +639,15 @@ public class BasicContainer extends Container {
      * @throws IOException on any error.
      */
     private List<String> mkLaunchCommand(final int memOnheap, final String stormRoot,
-            final String jlp) throws IOException {
+                                         final String jlp) throws IOException {
         final String javaCmd = javaCmd("java");
         final String stormOptions = ConfigUtils.concatIfNotNull(System.getProperty("storm.options"));
         final String stormConfFile = ConfigUtils.concatIfNotNull(System.getProperty("storm.conf.file"));
         final String workerTmpDir = ConfigUtils.workerTmpRoot(_conf, _workerId);
-        
+
         List<String> classPathParams = getClassPathParams(stormRoot);
         List<String> commonParams = getCommonParams();
-        
+
         List<String> commandList = new ArrayList<>();
         //Log Writer Command...
         commandList.add(javaCmd);
@@ -676,7 +676,7 @@ public class BasicContainer extends Container {
         commandList.add(_supervisorId);
         commandList.add(String.valueOf(_port));
         commandList.add(_workerId);
-        
+
         return commandList;
     }
 
@@ -688,12 +688,12 @@ public class BasicContainer extends Container {
         String logPrefix = "Worker Process " + _workerId;
         ProcessExitCallback processExitCallback = new ProcessExitCallback(logPrefix);
         _exitedEarly = false;
-        
+
         final WorkerResources resources = _assignment.get_resources();
         final int memOnheap = getMemOnHeap(resources);
         final String stormRoot = ConfigUtils.supervisorStormDistRoot(_conf, _topologyId);
         final String jlp = javaLibraryPath(stormRoot, _conf);
-        
+
         List<String> commandList = mkLaunchCommand(memOnheap, stormRoot, jlp);
 
         Map<String, String> topEnvironment = new HashMap<String, String>();

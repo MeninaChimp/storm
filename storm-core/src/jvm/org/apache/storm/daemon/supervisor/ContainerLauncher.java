@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- *
+ * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.Map;
 
 import org.apache.storm.Config;
+import org.apache.storm.daemon.supervisor.cgroup.CgroupContainerLauncher;
 import org.apache.storm.generated.LocalAssignment;
 import org.apache.storm.messaging.IContext;
 import org.apache.storm.utils.ConfigUtils;
@@ -34,9 +35,9 @@ import org.slf4j.LoggerFactory;
  */
 public abstract class ContainerLauncher {
     private static final Logger LOG = LoggerFactory.getLogger(ContainerLauncher.class);
-    
+
     /**
-     * Factory to create the right container launcher 
+     * Factory to create the right container launcher
      * for the config and the environment.
      * @param conf the config
      * @param supervisorId the ID of the supervisor
@@ -48,13 +49,19 @@ public abstract class ContainerLauncher {
         if (ConfigUtils.isLocalMode(conf)) {
             return new LocalContainerLauncher(conf, supervisorId, sharedContext);
         }
-        
+
         if (Utils.getBoolean(conf.get(Config.SUPERVISOR_RUN_WORKER_AS_USER), false)) {
             return new RunAsUserContainerLauncher(conf, supervisorId);
         }
+
+        if (Utils.getBoolean(conf.get(org.apache.storm.daemon.supervisor.cgroup.Config.CGROUP_ENABLE), false)) {
+            LOG.info("CGROUP enable");
+            return new CgroupContainerLauncher(conf, supervisorId);
+        }
+
         return new BasicContainerLauncher(conf, supervisorId);
     }
-    
+
     protected ContainerLauncher() {
         //Empty
     }
@@ -65,10 +72,10 @@ public abstract class ContainerLauncher {
      * @param assignment what to launch
      * @param state the current state of the supervisor
      * @return The container that can be used to manager the processes.
-     * @throws IOException on any error 
+     * @throws IOException on any error
      */
     public abstract Container launchContainer(int port, LocalAssignment assignment, LocalState state) throws IOException;
-    
+
     /**
      * Recover a container for a running process
      * @param port the port the assignment is running on
@@ -79,7 +86,7 @@ public abstract class ContainerLauncher {
      * @throws ContainerRecoveryException if the Container could not be recovered
      */
     public abstract Container recoverContainer(int port, LocalAssignment assignment, LocalState state) throws IOException, ContainerRecoveryException;
-    
+
     /**
      * Try to recover a container using just the worker ID.  
      * The result is really only useful for killing the container
