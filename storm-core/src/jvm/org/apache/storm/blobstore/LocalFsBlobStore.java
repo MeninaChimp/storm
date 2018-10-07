@@ -17,7 +17,6 @@
  */
 package org.apache.storm.blobstore;
 
-import org.apache.storm.Config;
 import org.apache.storm.generated.SettableBlobMeta;
 import org.apache.storm.generated.AuthorizationException;
 import org.apache.storm.generated.KeyAlreadyExistsException;
@@ -80,6 +79,7 @@ public class LocalFsBlobStore extends BlobStore {
     private final int allPermissions = READ | WRITE | ADMIN;
     private Map conf;
     private CuratorFramework zkClient;
+    private BlobSyncSegment blobSyncSegment = new BlobSyncSegment();
 
     @Override
     public void prepare(Map conf, String overrideBase, NimbusInfo nimbusInfo) {
@@ -318,9 +318,10 @@ public class LocalFsBlobStore extends BlobStore {
     }
 
     //This additional check and download is for nimbus high availability in case you have more than one nimbus
-    public synchronized boolean checkForBlobOrDownload(String key) throws KeyNotFoundException {
+    public boolean checkForBlobOrDownload(String key) throws KeyNotFoundException {
         boolean checkBlobDownload = false;
         try {
+            blobSyncSegment.lock(key);
             List<String> keyList = BlobStoreUtils.getKeyListFromBlobStore(this);
             if (!keyList.contains(key)) {
                 if (zkClient.checkExists().forPath(BLOBSTORE_SUBTREE + key) != null) {
@@ -336,18 +337,28 @@ public class LocalFsBlobStore extends BlobStore {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }finally {
+            blobSyncSegment.unlock(key);
+            blobSyncSegment.release(key);
         }
+
         return checkBlobDownload;
     }
 
-    public synchronized void checkForBlobUpdate(String key) {
-        BlobStoreUtils.updateKeyForBlobStore(conf, this, zkClient, key, nimbusInfo);
+    public void checkForBlobUpdate(String key) {
+        try {
+            blobSyncSegment.lock(key);
+            BlobStoreUtils.updateKeyForBlobStore(conf, this, zkClient, key, nimbusInfo);
+        }finally {
+            blobSyncSegment.unlock(key);
+            blobSyncSegment.release(key);
+        }
     }
 
     public void fullCleanup(long age) throws IOException {
         fbs.fullCleanup(age);
     }
-    
+
     @VisibleForTesting
     File getKeyDataDir(String key) {
         return fbs.getKeyDir(DATA_PREFIX + key);
